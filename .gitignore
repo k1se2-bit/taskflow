@@ -18,3 +18,18 @@ ios/Runner/GoogleService-Info.plist
 # Platform
 *.log
 .DS_Store
+
+# Local configuration and signing
+.env
+.env.*
+!.env.example
+**/local.properties
+**/key.properties
+**/*.jks
+**/*.keystore
+
+# Android generated files
+android/.kotlin/
+android/app/debug/
+android/app/profile/
+android/app/release/
