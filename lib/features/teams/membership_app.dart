@@ -8,7 +8,7 @@ import '../../core/theme/app_theme.dart';
 import '../notifications/reminders_app.dart' show ReminderEngine, ReminderPage;
 import '../tasks/presentation/workspace.dart' show Workspace;
 import '../tasks/presentation/calendar_app.dart' show TaskCalendar;
-import 'teams_app.dart' show CreateTeamPage;
+import 'team_member_tools.dart';
 import 'team_tasks.dart';
 
 class MembershipApp extends StatefulWidget {
@@ -76,7 +76,7 @@ class _MembershipTeamsState extends State<MembershipTeams> {
   }
   @override
   Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Команды')),
-    floatingActionButton: FloatingActionButton(tooltip: 'Создать команду', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CreateTeamPage(uid: widget.uid))), child: const Icon(Icons.group_add_outlined)),
+    floatingActionButton: FloatingActionButton(tooltip: 'Создать команду', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CreateNamedTeamPage(uid: widget.uid))), child: const Icon(Icons.group_add_outlined)),
     body: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
       ExpansionTile(title: const Text('Подать заявку в команду'), children: [
         TextField(controller: teamId, enabled: !busy, decoration: const InputDecoration(labelText: 'ID команды от владельца')),
@@ -124,7 +124,7 @@ class _MembershipDetailsState extends State<MembershipDetails> {
         if (!request.exists || team.data()?['ownerId'] != widget.uid) throw StateError('Заявка недоступна или нет прав владельца');
         if (accept) {
           final currentNames = names(team.data());
-          currentNames[doc.id] = label.isEmpty ? 'Участник' : label;
+          currentNames[doc.id] = request.data()?['name'] as String? ?? 'Участник';
           transaction.update(widget.reference, {'memberIds': FieldValue.arrayUnion([doc.id]), 'memberNames': currentNames});
         }
         transaction.delete(doc.reference);
@@ -144,17 +144,11 @@ class _MembershipDetailsState extends State<MembershipDetails> {
     final owner = data['ownerId'] == widget.uid;
     final memberIds = List<String>.from(data['memberIds'] as List);
     final savedNames = names(data);
-
-    final memberNames = <String, String>{
-      for (final id in memberIds)
-        id: savedNames[id] ??
-            (data['ownerId'] == id ? 'Владелец' : ''),
-    };
+    final memberNames = <String, String>{for (final id in memberIds) id: savedNames[id] ?? (data['ownerId'] == id ? 'Владелец' : '')};
     return ListView(padding: const EdgeInsets.all(24), children: [
       Text(data['name'] as String? ?? '', style: Theme.of(context).textTheme.headlineSmall),
       Text(owner ? 'Ваша роль: владелец' : 'Ваша роль: участник'), Text('Участников: ${memberIds.length}'),
-      const SizedBox(height: 8), const Text('Участники'),
-      ...memberIds.map((id) => ListTile(contentPadding: EdgeInsets.zero, dense: true, leading: const Icon(Icons.person_outline), title: Text(memberLabel(memberNames, id, widget.uid)), subtitle: data['ownerId'] == id ? const Text('Владелец') : null)),
+      TeamMemberTools(team: widget.reference, uid: widget.uid, owner: owner, members: memberNames, ownerId: data['ownerId'] as String),
       if (owner) ...[const SizedBox(height: 16), SelectableText('ID: ${widget.reference.id}'), OutlinedButton.icon(onPressed: copyId, icon: const Icon(Icons.copy), label: const Text('Скопировать ID для заявки')), const Text('Передайте ID нужному человеку. Сам ID не даёт доступ к команде — требуется ваше одобрение.')],
       if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
       if (busy) const LinearProgressIndicator(),
