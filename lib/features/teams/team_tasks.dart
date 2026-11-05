@@ -98,7 +98,16 @@ class _TeamTaskEditorState extends State<TeamTaskEditor> {
     reference = widget.task ?? widget.team.collection('tasks').doc();
     final stamp = initial['deadline'];
     deadline = stamp is Timestamp ? stamp.toDate() : null;
-    assignee = initial['assignedTo'] as String? ?? (widget.members.containsKey(widget.uid) ? widget.uid : widget.members.keys.first);
+    final previousAssignee = initial['assignedTo'] as String?;
+
+    assignee = previousAssignee != null &&
+            widget.members.containsKey(previousAssignee)
+        ? previousAssignee
+        : widget.members.containsKey(widget.uid)
+            ? widget.uid
+            : widget.members.isNotEmpty
+                ? widget.members.keys.first
+                : widget.uid;
   }
   @override
   void dispose() { title.dispose(); description.dispose(); super.dispose(); }

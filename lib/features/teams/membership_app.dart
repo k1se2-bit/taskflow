@@ -143,7 +143,13 @@ class _MembershipDetailsState extends State<MembershipDetails> {
     final data = s.data!.data(); if (data == null) return const Center(child: Text('Команда недоступна'));
     final owner = data['ownerId'] == widget.uid;
     final memberIds = List<String>.from(data['memberIds'] as List);
-    final memberNames = names(data);
+    final savedNames = names(data);
+
+    final memberNames = <String, String>{
+      for (final id in memberIds)
+        id: savedNames[id] ??
+            (data['ownerId'] == id ? 'Владелец' : ''),
+    };
     return ListView(padding: const EdgeInsets.all(24), children: [
       Text(data['name'] as String? ?? '', style: Theme.of(context).textTheme.headlineSmall),
       Text(owner ? 'Ваша роль: владелец' : 'Ваша роль: участник'), Text('Участников: ${memberIds.length}'),
