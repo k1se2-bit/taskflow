@@ -9,6 +9,7 @@ import '../notifications/reminders_app.dart' show ReminderEngine, ReminderPage;
 import '../tasks/presentation/workspace.dart' show Workspace;
 import '../tasks/presentation/calendar_app.dart' show TaskCalendar;
 import 'teams_app.dart' show CreateTeamPage;
+import 'team_tasks.dart';
 
 class MembershipApp extends StatefulWidget {
   const MembershipApp({super.key});
@@ -142,7 +143,13 @@ class _MembershipDetailsState extends State<MembershipDetails> {
         if (r.data!.docs.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Заявок пока нет'));
         return Column(children: r.data!.docs.map((doc) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(doc.data()['name'] as String? ?? ''), SelectableText('UID: ${doc.id}'), Wrap(spacing: 8, children: [FilledButton(onPressed: busy ? null : () => decide(doc, true), child: const Text('Принять')), TextButton(onPressed: busy ? null : () => decide(doc, false), child: const Text('Отклонить'))])])))).toList());
       })],
-      const SizedBox(height: 16), const Text('Командные задачи добавим следующим этапом. Личные задачи не передаются участникам команды.'),
+      const SizedBox(height: 16),
+      TeamTaskPanel(
+        uid: widget.uid,
+        team: widget.reference,
+        owner: owner,
+        members: List<String>.from(data['memberIds'] as List),
+      ),
     ]);
   }));
 }
