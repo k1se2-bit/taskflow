@@ -2,9 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function owner(orgId) {
-      return signedIn() && get(/databases/$(database)/documents/organizations/$(orgId)).data.ownerId == request.auth.uid;
-    }
+    function organization(orgId) { return get(/databases/$(database)/documents/organizations/$(orgId)).data; }
+    function owner(orgId) { return signedIn() && organization(orgId).ownerId == request.auth.uid; }
+    function member(orgId) { return signedIn() && request.auth.uid in organization(orgId).memberIds; }
     match /users/{userId} {
       allow read, write: if signedIn() && request.auth.uid == userId;
       match /tasks/{taskId} { allow read, write: if signedIn() && request.auth.uid == userId; }
@@ -15,20 +15,18 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['name', 'ownerId', 'memberIds', 'createdAt'])
         && request.resource.data.keys().hasOnly(['name', 'ownerId', 'memberIds', 'createdAt'])
         && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 100
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.memberIds == [request.auth.uid]
+        && request.resource.data.ownerId == request.auth.uid && request.resource.data.memberIds == [request.auth.uid]
         && request.resource.data.createdAt == request.time;
       allow update: if signedIn() && resource.data.ownerId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds'])
-        && request.resource.data.memberIds is list
-        && request.resource.data.memberIds.size() <= 50
+        && request.resource.data.memberIds is list && request.resource.data.memberIds.size() <= 50
         && request.resource.data.ownerId in request.resource.data.memberIds;
       allow delete: if false;
       match /joinRequests/{userId} {
         allow read: if signedIn() && (request.auth.uid == userId || owner(orgId));
         allow create: if signedIn() && request.auth.uid == userId
           && exists(/databases/$(database)/documents/organizations/$(orgId))
-          && !(userId in get(/databases/$(database)/documents/organizations/$(orgId)).data.memberIds)
+          && !(userId in organization(orgId).memberIds)
           && request.resource.data.keys().hasAll(['uid', 'name', 'createdAt'])
           && request.resource.data.keys().hasOnly(['uid', 'name', 'createdAt'])
           && request.resource.data.uid == userId
@@ -36,6 +34,23 @@ service cloud.firestore {
           && request.resource.data.createdAt == request.time;
         allow update: if false;
         allow delete: if signedIn() && (request.auth.uid == userId || owner(orgId));
+      }
+      match /tasks/{taskId} {
+        allow read: if member(orgId) && (owner(orgId) || resource.data.assignedTo == request.auth.uid);
+        allow create: if owner(orgId)
+          && request.resource.data.keys().hasAll(['title', 'description', 'assignedTo', 'creatorId', 'status', 'deadline', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['title', 'description', 'assignedTo', 'creatorId', 'status', 'deadline', 'createdAt', 'updatedAt'])
+          && request.resource.data.title is string && request.resource.data.title.size() >= 1 && request.resource.data.title.size() <= 200
+          && request.resource.data.description is string && request.resource.data.description.size() <= 5000
+          && request.resource.data.assignedTo is string && request.resource.data.assignedTo in organization(orgId).memberIds
+          && request.resource.data.creatorId == request.auth.uid && request.resource.data.status == 'todo'
+          && (request.resource.data.deadline == null || request.resource.data.deadline is timestamp)
+          && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+        allow update: if member(orgId) && (owner(orgId) || resource.data.assignedTo == request.auth.uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['todo', 'inProgress', 'done']
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
       }
     }
   }
