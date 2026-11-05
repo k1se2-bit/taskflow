@@ -87,7 +87,14 @@ class _TaskCalendarState extends State<TaskCalendar> {
     if (!s.hasData) return const Center(child: CircularProgressIndicator());
     final docs = s.data!.docs.toList()..sort((a, b) => (a.data()['name'] as String? ?? '').compareTo(b.data()['name'] as String? ?? ''));
     if (docs.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Доступных команд нет. Создайте команду или дождитесь одобрения заявки во вкладке «Команды».'));
-    final selectedTeam = docs.firstWhere((d) => d.id == teamId, orElse: () => docs.first);
+    QueryDocumentSnapshot<Map<String, dynamic>> selectedTeam = docs.first;
+
+    for (final doc in docs) {
+      if (doc.id == teamId) {
+        selectedTeam = doc;
+        break;
+      }
+    }
     final owner = selectedTeam.data()['ownerId'] == widget.uid;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       DropdownButton<String>(value: selectedTeam.id, isExpanded: true, items: docs.map((d) => DropdownMenuItem(value: d.id, child: Text(d.data()['name'] as String? ?? d.id, overflow: TextOverflow.ellipsis))).toList(), onChanged: (id) => setState(() => teamId = id)),
