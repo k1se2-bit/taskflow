@@ -4,12 +4,17 @@ import '../../app.dart' show errorText;
 import '../tasks/presentation/workspace.dart' show dateLabel;
 
 const teamStatuses = {'todo': 'Новая', 'inProgress': 'В работе', 'done': 'Выполнена'};
+String memberLabel(Map<String, String> members, String uid, String currentUid) {
+  final name = members[uid];
+  if (uid == currentUid) return name == null || name.isEmpty ? 'Я' : '$name (я)';
+  return name == null || name.isEmpty ? 'Участник ${uid.substring(0, 6)}…' : name;
+}
 class TeamTaskPanel extends StatefulWidget {
   const TeamTaskPanel({super.key, required this.uid, required this.team, required this.owner, required this.members});
   final String uid;
   final DocumentReference<Map<String, dynamic>> team;
   final bool owner;
-  final List<String> members;
+  final Map<String, String> members;
   @override
   State<TeamTaskPanel> createState() => _TeamTaskPanelState();
 }
@@ -39,7 +44,7 @@ class _TeamTaskPanelState extends State<TeamTaskPanel> {
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     const Divider(), Text(widget.owner ? 'Задачи команды' : 'Назначенные мне задачи', style: Theme.of(context).textTheme.titleLarge),
-    if (widget.owner) FilledButton.icon(icon: const Icon(Icons.add_task), label: const Text('Назначить задачу'), onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CreateTeamTask(team: widget.team, uid: widget.uid, members: widget.members)))),
+    if (widget.owner) FilledButton.icon(icon: const Icon(Icons.add_task), label: const Text('Назначить задачу'), onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TeamTaskEditor(team: widget.team, uid: widget.uid, members: widget.members)))),
     if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
     StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(stream: stream, builder: (context, snapshot) {
       if (snapshot.hasError) return Column(children: [Text('${errorText(snapshot.error!)} Проверьте публикацию обновлённых правил.'), TextButton(onPressed: () => setState(() => stream = watch()), child: const Text('Повторить'))]);
@@ -49,36 +54,52 @@ class _TeamTaskPanelState extends State<TeamTaskPanel> {
       return Column(children: docs.map((doc) {
         final data = doc.data(); final stamp = data['deadline']; final deadline = stamp is Timestamp ? stamp.toDate() : null;
         final status = data['status'] as String? ?? 'todo';
+        final assignee = data['assignedTo'] as String? ?? '';
         return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(data['title'] as String? ?? '', style: Theme.of(context).textTheme.titleMedium),
           if ((data['description'] as String? ?? '').isNotEmpty) Text(data['description'] as String),
-          SelectableText('Исполнитель UID: ${data['assignedTo']}'),
+          Text('Исполнитель: ${memberLabel(widget.members, assignee, widget.uid)}'),
           Text(deadline == null ? 'Без срока' : 'Срок: ${dateLabel(deadline)}'),
-          PopupMenuButton<String>(enabled: !pending.contains(doc.id), onSelected: (v) => change(doc, v), itemBuilder: (_) => teamStatuses.entries.map((e) => PopupMenuItem(value: e.key, child: Text(e.value))).toList(), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(pending.contains(doc.id) ? 'Сохранение…' : '${teamStatuses[status] ?? status} ▾'))),
+          Row(children: [
+            Expanded(child: PopupMenuButton<String>(enabled: !pending.contains(doc.id), onSelected: (v) => change(doc, v), itemBuilder: (_) => teamStatuses.entries.map((e) => PopupMenuItem(value: e.key, child: Text(e.value))).toList(), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(pending.contains(doc.id) ? 'Сохранение…' : '${teamStatuses[status] ?? status} ▾')))),
+            if (widget.owner) IconButton(tooltip: 'Редактировать', icon: const Icon(Icons.edit_outlined), onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TeamTaskEditor(team: widget.team, uid: widget.uid, members: widget.members, task: doc.reference, initial: data)))),
+          ]),
         ])));
       }).toList());
     }),
   ]);
 }
-class CreateTeamTask extends StatefulWidget {
-  const CreateTeamTask({super.key, required this.team, required this.uid, required this.members});
+class TeamTaskEditor extends StatefulWidget {
+  const TeamTaskEditor({super.key, required this.team, required this.uid, required this.members, this.task, this.initial});
   final DocumentReference<Map<String, dynamic>> team;
   final String uid;
-  final List<String> members;
+  final Map<String, String> members;
+  final DocumentReference<Map<String, dynamic>>? task;
+  final Map<String, dynamic>? initial;
   @override
-  State<CreateTeamTask> createState() => _CreateTeamTaskState();
+  State<TeamTaskEditor> createState() => _TeamTaskEditorState();
 }
-class _CreateTeamTaskState extends State<CreateTeamTask> {
+class _TeamTaskEditorState extends State<TeamTaskEditor> {
   final form = GlobalKey<FormState>();
-  final title = TextEditingController();
-  final description = TextEditingController();
+  late final TextEditingController title;
+  late final TextEditingController description;
   late final DocumentReference<Map<String, dynamic>> reference;
   late String assignee;
   DateTime? deadline;
   bool busy = false;
   String? error;
+  bool get editing => widget.task != null;
   @override
-  void initState() { super.initState(); reference = widget.team.collection('tasks').doc(); assignee = widget.members.contains(widget.uid) ? widget.uid : widget.members.first; }
+  void initState() {
+    super.initState();
+    final initial = widget.initial ?? const {};
+    title = TextEditingController(text: initial['title'] as String? ?? '');
+    description = TextEditingController(text: initial['description'] as String? ?? '');
+    reference = widget.task ?? widget.team.collection('tasks').doc();
+    final stamp = initial['deadline'];
+    deadline = stamp is Timestamp ? stamp.toDate() : null;
+    assignee = initial['assignedTo'] as String? ?? (widget.members.containsKey(widget.uid) ? widget.uid : widget.members.keys.first);
+  }
   @override
   void dispose() { title.dispose(); description.dispose(); super.dispose(); }
   Future<void> pickDate() async {
@@ -91,20 +112,22 @@ class _CreateTeamTaskState extends State<CreateTeamTask> {
     setState(() { busy = true; error = null; });
     var success = false;
     try {
-      await reference.set({'title': title.text.trim(), 'description': description.text.trim(), 'assignedTo': assignee, 'creatorId': widget.uid, 'status': 'todo', 'deadline': deadline == null ? null : Timestamp.fromDate(deadline!), 'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp()});
+      final values = {'title': title.text.trim(), 'description': description.text.trim(), 'assignedTo': assignee, 'deadline': deadline == null ? null : Timestamp.fromDate(deadline!), 'updatedAt': FieldValue.serverTimestamp()};
+      if (editing) { await reference.update(values); }
+      else { await reference.set({...values, 'creatorId': widget.uid, 'status': 'todo', 'createdAt': FieldValue.serverTimestamp()}); }
       success = true;
     } catch (e) { if (mounted) setState(() => error = errorText(e)); }
     finally { if (mounted) setState(() => busy = false); }
     if (success && mounted) Navigator.of(context).pop();
   }
   @override
-  Widget build(BuildContext context) => PopScope(canPop: !busy, child: Scaffold(appBar: AppBar(title: const Text('Командная задача')), body: Form(key: form, child: ListView(padding: const EdgeInsets.all(24), children: [
+  Widget build(BuildContext context) => PopScope(canPop: !busy, child: Scaffold(appBar: AppBar(title: Text(editing ? 'Редактировать задачу' : 'Командная задача')), body: Form(key: form, child: ListView(padding: const EdgeInsets.all(24), children: [
     TextFormField(controller: title, enabled: !busy, maxLength: 200, decoration: const InputDecoration(labelText: 'Название'), validator: (v) => v == null || v.trim().isEmpty ? 'Введите название' : null),
     TextFormField(controller: description, enabled: !busy, maxLength: 5000, maxLines: 4, decoration: const InputDecoration(labelText: 'Описание')),
-    DropdownButtonFormField<String>(value: assignee, isExpanded: true, decoration: const InputDecoration(labelText: 'Исполнитель (UID)'), items: widget.members.toSet().map((id) => DropdownMenuItem(value: id, child: Text(id == widget.uid ? 'Я ($id)' : id, overflow: TextOverflow.ellipsis))).toList(), onChanged: busy ? null : (v) => setState(() => assignee = v ?? assignee)),
+    DropdownButtonFormField<String>(value: assignee, isExpanded: true, decoration: const InputDecoration(labelText: 'Исполнитель'), items: widget.members.keys.map((id) => DropdownMenuItem(value: id, child: Text(memberLabel(widget.members, id, widget.uid), overflow: TextOverflow.ellipsis))).toList(), onChanged: busy ? null : (v) => setState(() => assignee = v ?? assignee)),
     OutlinedButton.icon(onPressed: busy ? null : pickDate, icon: const Icon(Icons.event), label: Text(deadline == null ? 'Выбрать срок' : dateLabel(deadline!))),
     if (deadline != null) TextButton(onPressed: busy ? null : () => setState(() => deadline = null), child: const Text('Убрать срок')),
     if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-    const SizedBox(height: 16), FilledButton(onPressed: busy ? null : save, child: Text(busy ? 'Сохранение…' : 'Назначить')),
+    const SizedBox(height: 16), FilledButton(onPressed: busy ? null : save, child: Text(busy ? 'Сохранение…' : (editing ? 'Сохранить' : 'Назначить'))),
   ]))));
 }

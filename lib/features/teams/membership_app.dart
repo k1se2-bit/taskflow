@@ -107,16 +107,26 @@ class _MembershipDetailsState extends State<MembershipDetails> {
   String? error;
   @override
   void initState() { super.initState(); teamStream = widget.reference.snapshots(); requests = widget.reference.collection('joinRequests').snapshots(); }
+  Map<String, String> names(Map<String, dynamic>? data) {
+    final raw = data?['memberNames'];
+    if (raw is Map) return raw.map((key, value) => MapEntry(key.toString(), value.toString()));
+    return {};
+  }
   Future<void> decide(QueryDocumentSnapshot<Map<String, dynamic>> doc, bool accept) async {
     if (busy) return;
-    final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text(accept ? 'Принять участника?' : 'Отклонить заявку?'), content: Text('${doc.data()['name']}\nUID: ${doc.id}\nИмя указано самим заявителем. Убедитесь, что это нужный человек.'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Подтвердить'))]));
+    final label = doc.data()['name'] as String? ?? '';
+    final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: Text(accept ? 'Принять участника?' : 'Отклонить заявку?'), content: Text('$label\nUID: ${doc.id}\nИмя указано самим заявителем. Убедитесь, что это нужный человек.'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Подтвердить'))]));
     if (confirmed != true || !mounted) return;
     setState(() { busy = true; error = null; });
     try {
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final team = await transaction.get(widget.reference); final request = await transaction.get(doc.reference);
         if (!request.exists || team.data()?['ownerId'] != widget.uid) throw StateError('Заявка недоступна или нет прав владельца');
-        if (accept) transaction.update(widget.reference, {'memberIds': FieldValue.arrayUnion([doc.id])});
+        if (accept) {
+          final currentNames = names(team.data());
+          currentNames[doc.id] = label.isEmpty ? 'Участник' : label;
+          transaction.update(widget.reference, {'memberIds': FieldValue.arrayUnion([doc.id]), 'memberNames': currentNames});
+        }
         transaction.delete(doc.reference);
       });
     } catch (e) { if (mounted) setState(() => error = '${errorText(e)} Максимум 50 участников в этой версии.'); }
@@ -132,9 +142,13 @@ class _MembershipDetailsState extends State<MembershipDetails> {
     if (!s.hasData) return const Center(child: CircularProgressIndicator());
     final data = s.data!.data(); if (data == null) return const Center(child: Text('Команда недоступна'));
     final owner = data['ownerId'] == widget.uid;
+    final memberIds = List<String>.from(data['memberIds'] as List);
+    final memberNames = names(data);
     return ListView(padding: const EdgeInsets.all(24), children: [
       Text(data['name'] as String? ?? '', style: Theme.of(context).textTheme.headlineSmall),
-      Text(owner ? 'Ваша роль: владелец' : 'Ваша роль: участник'), Text('Участников: ${(data['memberIds'] as List).length}'),
+      Text(owner ? 'Ваша роль: владелец' : 'Ваша роль: участник'), Text('Участников: ${memberIds.length}'),
+      const SizedBox(height: 8), const Text('Участники'),
+      ...memberIds.map((id) => ListTile(contentPadding: EdgeInsets.zero, dense: true, leading: const Icon(Icons.person_outline), title: Text(memberLabel(memberNames, id, widget.uid)), subtitle: data['ownerId'] == id ? const Text('Владелец') : null)),
       if (owner) ...[const SizedBox(height: 16), SelectableText('ID: ${widget.reference.id}'), OutlinedButton.icon(onPressed: copyId, icon: const Icon(Icons.copy), label: const Text('Скопировать ID для заявки')), const Text('Передайте ID нужному человеку. Сам ID не даёт доступ к команде — требуется ваше одобрение.')],
       if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
       if (busy) const LinearProgressIndicator(),
@@ -144,12 +158,7 @@ class _MembershipDetailsState extends State<MembershipDetails> {
         return Column(children: r.data!.docs.map((doc) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(doc.data()['name'] as String? ?? ''), SelectableText('UID: ${doc.id}'), Wrap(spacing: 8, children: [FilledButton(onPressed: busy ? null : () => decide(doc, true), child: const Text('Принять')), TextButton(onPressed: busy ? null : () => decide(doc, false), child: const Text('Отклонить'))])])))).toList());
       })],
       const SizedBox(height: 16),
-      TeamTaskPanel(
-        uid: widget.uid,
-        team: widget.reference,
-        owner: owner,
-        members: List<String>.from(data['memberIds'] as List),
-      ),
+      TeamTaskPanel(uid: widget.uid, team: widget.reference, owner: owner, members: memberNames),
     ]);
   }));
 }
