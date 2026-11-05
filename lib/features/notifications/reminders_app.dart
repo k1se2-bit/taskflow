@@ -132,7 +132,19 @@ class ReminderEngine {
       await plugin.zonedSchedule(entry.key, item.title, item.body, tz.TZDateTime.from(item.time.toUtc(), tz.UTC), details, androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle, uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime, payload: item.path);
       plans[entry.key] = item.signature;
     }
-    if (token == generation) status.value = 'Запланировано на этом устройстве: ${plans.length}. Android может задерживать показ.';
+    if (token == generation) await updatePendingCount();
+  }
+  Future<void> updatePendingCount() async {
+    if (!initialized || uid == null) return;
+    final token = generation;
+    final pending = await plugin.pendingNotificationRequests();
+    final enabled = await plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.areNotificationsEnabled();
+    if (token != generation || uid == null) return;
+    if (enabled == false) {
+      status.value = 'Уведомления запрещены. Нажмите «Разрешить и проверить».';
+      return;
+    }
+    status.value = 'Ожидают показа на этом устройстве: ${pending.length}. Android может задерживать показ.';
   }
   Future<void> refresh() async {
     final current = uid; final token = generation;
@@ -148,7 +160,12 @@ class ReminderEngine {
     final allowed = await plugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.requestNotificationsPermission();
     if (allowed == false) throw StateError('Разрешите уведомления в настройках Android');
   }
-  Future<void> test() async { await permission(); await plugin.show(0, 'TaskFlow', 'Уведомления включены', details); await refresh(); }
+  Future<void> test() async {
+    await permission();
+    await plugin.show(0, 'TaskFlow', 'Уведомления включены', details);
+    await refresh();
+    await updatePendingCount();
+  }
 }
 
 class RemindersApp extends StatefulWidget {
@@ -187,21 +204,52 @@ class ReminderPage extends StatefulWidget {
   @override
   State<ReminderPage> createState() => _ReminderPageState();
 }
-class _ReminderPageState extends State<ReminderPage> {
+class _ReminderPageState extends State<ReminderPage> with WidgetsBindingObserver {
   late final DocumentReference<Map<String, dynamic>> user;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> personal;
   late final Stream<QuerySnapshot<Map<String, dynamic>>> teams;
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> settings;
+  Timer? counterTimer;
+  bool counterBusy = false;
   bool teamMode = false;
   bool busy = false;
   String? message;
   @override
   void initState() {
-    super.initState(); user = FirebaseFirestore.instance.collection('users').doc(widget.uid);
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    user = FirebaseFirestore.instance.collection('users').doc(widget.uid);
     personal = user.collection('tasks').orderBy('createdAt', descending: true).snapshots();
     teams = FirebaseFirestore.instance.collection('organizations').where('memberIds', arrayContains: widget.uid).snapshots();
     settings = user.snapshots();
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state == null || state == AppLifecycleState.resumed) startCounter();
   }
+  void startCounter() {
+    counterTimer?.cancel();
+    counterTimer = Timer.periodic(const Duration(seconds: 15), (_) { unawaited(refreshPendingCount()); });
+    unawaited(refreshPendingCount());
+  }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) { startCounter(); }
+    else { counterTimer?.cancel(); counterTimer = null; }
+  }
+  Future<void> refreshPendingCount() async {
+    if (counterBusy || !mounted) return;
+    counterBusy = true;
+    try {
+      final engine = ReminderEngine.instance;
+      await engine.queue;
+      if (!mounted || FirebaseAuth.instance.currentUser?.uid != widget.uid) return;
+      await engine.updatePendingCount();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) setState(() => message = 'Не удалось обновить счётчик: ${errorText(e)}');
+    } finally { counterBusy = false; }
+  }
+  @override
+  void dispose() { counterTimer?.cancel(); WidgetsBinding.instance.removeObserver(this); super.dispose(); }
   Future<void> perform(Future<void> Function() action) async {
     if (busy) return;
     setState(() { busy = true; message = null; });
@@ -261,9 +309,9 @@ class _ReminderPageState extends State<ReminderPage> {
     });
   });
   @override
-  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Напоминания')), body: ListView(padding: const EdgeInsets.all(16), children: [
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Напоминания'), actions: [IconButton(tooltip: 'Обновить счётчик', onPressed: () { unawaited(refreshPendingCount()); }, icon: const Icon(Icons.refresh))]), body: ListView(padding: const EdgeInsets.all(16), children: [
     const Text('Одно личное напоминание на задачу. Время — по часам устройства. Android может задерживать показ. Изменения с других устройств, выполнение и переназначение учитываются после синхронизации приложения. На закрытом или отключённом от сети устройстве старое уведомление может ещё сработать.'),
-    const SizedBox(height: 12), FilledButton(onPressed: busy ? null : () => perform(ReminderEngine.instance.test), child: const Text('Разрешить и проверить')),
+    const SizedBox(height: 12), FilledButton(onPressed: busy ? null : () => perform(() async { await ReminderEngine.instance.test(); }), child: const Text('Разрешить и проверить')),
     ValueListenableBuilder<String>(valueListenable: ReminderEngine.instance.status, builder: (_, value, __) => Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(value))),
     Wrap(spacing: 8, children: [ChoiceChip(label: const Text('Личные'), selected: !teamMode, onSelected: (_) => setState(() => teamMode = false)), ChoiceChip(label: const Text('Командные'), selected: teamMode, onSelected: (_) => setState(() => teamMode = true))]),
     if (teamMode) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Время командного напоминания видно только вам. Владелец не назначает его за другого исполнителя.')),
