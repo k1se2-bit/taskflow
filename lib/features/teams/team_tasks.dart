@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../app.dart' show errorText;
 import '../tasks/presentation/workspace.dart' show dateLabel;
+import '../tasks/presentation/task_details_page.dart' show TaskDetailsPage;
 
 const teamStatuses = {'todo': 'Новая', 'inProgress': 'В работе', 'done': 'Выполнена'};
 String memberLabel(Map<String, String> members, String uid, String currentUid) {
@@ -63,6 +64,9 @@ class _TeamTaskPanelState extends State<TeamTaskPanel> {
   void edit([QueryDocumentSnapshot<Map<String, dynamic>>? doc]) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TeamTaskEditor(team: widget.team, uid: widget.uid, members: widget.members, task: doc?.reference, initial: doc?.data())));
   }
+  void openDetails(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: doc.reference, teamId: widget.team.id)));
+  }
   @override
   Widget build(BuildContext context) {
     final assignee = widget.owner && widget.members.containsKey(assigneeFilter) ? assigneeFilter : '';
@@ -98,15 +102,15 @@ class _TeamTaskPanelState extends State<TeamTaskPanel> {
           ...docs.map((doc) {
             final data = doc.data(); final stamp = data['deadline']; final deadline = stamp is Timestamp ? stamp.toDate() : null;
             final status = data['status'] as String? ?? 'todo'; final late = teamTaskIsOverdue(data, now);
-            return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(data['title'] as String? ?? '', style: Theme.of(context).textTheme.titleMedium?.copyWith(decoration: status == 'done' ? TextDecoration.lineThrough : null)),
+            return Card(child: InkWell(onTap: pending.contains(doc.id) ? null : () => openDetails(doc), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [Expanded(child: Text(data['title'] as String? ?? '', style: Theme.of(context).textTheme.titleMedium?.copyWith(decoration: status == 'done' ? TextDecoration.lineThrough : null))), const Icon(Icons.chevron_right)]),
               if ((data['description'] as String? ?? '').isNotEmpty) Text(data['description'] as String),
               Text('Исполнитель: ${memberLabel(widget.members, data['assignedTo'] as String? ?? '', widget.uid)}'),
               Text(deadline == null ? 'Без срока' : 'Срок: ${dateLabel(deadline)}${late ? ' — просрочена' : ''}', style: late ? TextStyle(color: Theme.of(context).colorScheme.error) : null),
               Row(children: [Expanded(child: PopupMenuButton<String>(enabled: !pending.contains(doc.id), onSelected: (value) => change(doc, value), itemBuilder: (_) => teamStatuses.entries.map((entry) => PopupMenuItem(value: entry.key, child: Text(entry.value))).toList(), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(pending.contains(doc.id) ? 'Сохранение…' : '${teamStatuses[status] ?? status} ▾')))),
                 if (widget.owner) IconButton(tooltip: 'Редактировать', icon: const Icon(Icons.edit_outlined), onPressed: pending.contains(doc.id) ? null : () => edit(doc)),
               ]),
-            ])));
+            ]))));
           }),
         ]);
       }),

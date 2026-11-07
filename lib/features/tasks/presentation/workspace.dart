@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../app.dart' show AccountScreen, errorText;
 import '../../../core/theme/app_theme.dart';
+import 'task_details_page.dart' show TaskDetailsPage;
 
 const priorities = {'low': 'Низкий', 'medium': 'Обычный', 'high': 'Высокий'};
 String dateLabel(DateTime d) => '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
@@ -82,7 +83,7 @@ class _WorkspaceState extends State<Workspace> {
             leading: Checkbox(value: done, onChanged: pending.contains(doc.id) ? null : (value) => toggle(doc.id, value ?? false)),
             title: Text(v['title'] as String? ?? '', style: TextStyle(decoration: done ? TextDecoration.lineThrough : null)),
             subtitle: Text('$priority${deadline == null ? '' : ' • ${dateLabel(deadline)}'}${overdue ? ' • Просрочено' : ''}${doc.metadata.hasPendingWrites ? ' • Синхронизация…' : ''}', style: TextStyle(color: overdue ? Theme.of(context).colorScheme.error : null)),
-            trailing: const Icon(Icons.chevron_right), onTap: pending.contains(doc.id) ? null : () => edit(doc),
+            trailing: const Icon(Icons.chevron_right), onTap: pending.contains(doc.id) ? null : () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: doc.reference))),
           );
         });
       })),
