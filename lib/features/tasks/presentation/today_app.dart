@@ -5,10 +5,11 @@ import 'package:flutter/material.dart';
 import '../../../app.dart' show AccountScreen, errorText;
 import '../../../core/theme/app_theme.dart';
 import '../../teams/membership_app.dart' show MembershipTeams;
-import '../../teams/team_tasks.dart' show TeamTaskEditor, teamStatuses;
+import '../../teams/team_tasks.dart' show teamStatuses;
 import '../../notifications/reminders_app.dart' show ReminderEngine, ReminderPage;
 import 'calendar_app.dart' show TaskCalendar;
 import 'workspace.dart' show Workspace, TaskEditor, dateLabel;
+import 'task_details_page.dart';
 
 const todaySections = {'overdue': 'Просроченные', 'today': 'Сегодня', 'upcoming': 'Предстоящие', 'noDate': 'Без срока'};
 String? todaySection(Map<String, dynamic> data, DateTime now) {
@@ -140,24 +141,12 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
     } catch (error) { if (mounted) setState(() => errors['write'] = errorText(error)); }
     finally { if (mounted) setState(() => pending.remove(key)); }
   }
-  void edit(_TodayItem? item) {
-    if (item == null || item.teamId == null) {
-      final reference = item?.doc.reference ?? FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('tasks').doc();
-      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskEditor(reference: reference, initial: item?.doc.data())));
-      return;
-    }
-    if (item.teamData?['ownerId'] != widget.uid) return;
-    final data = item.teamData!; final names = data['memberNames'];
-    final members = <String, String>{for (final id in List<String>.from(data['memberIds'] as List)) id: names is Map && names[id] is String ? names[id] as String : (id == data['ownerId'] ? 'Владелец' : '')};
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TeamTaskEditor(team: FirebaseFirestore.instance.collection('organizations').doc(item.teamId!), uid: widget.uid, members: members, task: item.doc.reference, initial: item.doc.data())));
+  void createPersonalTask() {
+    final reference = FirebaseFirestore.instance.collection('users').doc(widget.uid).collection('tasks').doc();
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskEditor(reference: reference)));
   }
   void open(_TodayItem item) {
-    if (item.teamId == null) { edit(item); return; }
-    final data = item.doc.data(); final stamp = data['deadline'];
-    showDialog<void>(context: context, builder: (ctx) => AlertDialog(title: Text(data['title'] as String? ?? ''), content: SingleChildScrollView(child: Text('${data['description'] ?? ''}\n\nКоманда: ${item.source}\nИсполнитель: я\nСрок: ${stamp is Timestamp ? dateLabel(stamp.toDate()) : 'без срока'}\nСтатус: ${teamStatuses[data['status']] ?? data['status']}')), actions: [
-      if (item.teamData?['ownerId'] == widget.uid) TextButton(onPressed: () { Navigator.pop(ctx); edit(item); }, child: const Text('Редактировать')),
-      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
-    ]));
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: item.doc.reference, teamId: item.teamId)));
   }
   Future<void> logout() async {
     if (signingOut) return;
@@ -195,7 +184,7 @@ class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
       IconButton(tooltip: 'Все личные задачи', icon: const Icon(Icons.list_alt), onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => Workspace(uid: widget.uid)))),
       IconButton(tooltip: 'Обновить подключения', icon: const Icon(Icons.refresh), onPressed: () => setState(bind)),
       IconButton(tooltip: 'Выйти', icon: const Icon(Icons.logout), onPressed: signingOut ? null : logout),
-    ]), floatingActionButton: FloatingActionButton.extended(onPressed: () => edit(null), icon: const Icon(Icons.add), label: const Text('Личная задача')), body: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
+    ]), floatingActionButton: FloatingActionButton.extended(onPressed: createPersonalTask, icon: const Icon(Icons.add), label: const Text('Личная задача')), body: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
       Text(dateLabel(now), style: Theme.of(context).textTheme.titleMedium), const SizedBox(height: 8),
       Text('На сегодня: $todayCount · Просрочено: $overdueCount · Всего активных: $active'),
       const Text('Личные задачи и мои назначения из всех команд. Завершённые задачи доступны в личном списке и внутри команды.'),
