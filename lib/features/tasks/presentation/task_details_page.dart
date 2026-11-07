@@ -5,6 +5,7 @@ import '../../../app.dart' show errorText;
 import '../../notifications/reminders_app.dart' show ReminderEngine, reminderKey, reminderTime;
 import '../../teams/team_tasks.dart' show TeamTaskEditor, teamStatuses, memberLabel;
 import 'workspace.dart' show TaskEditor, dateLabel, priorities;
+import 'reminder_preference_panel.dart';
 
 bool detailsCanEdit(String uid, {String? personalOwner, Map<String, dynamic>? team}) => personalOwner != null ? uid == personalOwner : team?['ownerId'] == uid && (team?['memberIds'] is List && (team!['memberIds'] as List).contains(uid));
 bool detailsCanChangeStatus(String uid, Map<String, dynamic> task, {String? personalOwner, Map<String, dynamic>? team}) => detailsCanEdit(uid, personalOwner: personalOwner, team: team) || (personalOwner == null && team?['memberIds'] is List && (team!['memberIds'] as List).contains(uid) && task['assignedTo'] == uid);
@@ -22,7 +23,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
   late final Stream<User?> auth;
   late final Stream<DocumentSnapshot<Map<String, dynamic>>> taskStream;
   late final DocumentReference<Map<String, dynamic>> user;
-  late final Stream<DocumentSnapshot<Map<String, dynamic>>> preferences;
+  late final Stream<Map<String, dynamic>?> preferences;
   DocumentReference<Map<String, dynamic>>? teamReference;
   Stream<DocumentSnapshot<Map<String, dynamic>>>? teamStream;
   bool busy = false;
@@ -33,7 +34,8 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
   void initState() {
     super.initState(); auth = FirebaseAuth.instance.authStateChanges();
     taskStream = widget.reference.snapshots(includeMetadataChanges: true);
-    user = FirebaseFirestore.instance.collection('users').doc(widget.uid); preferences = user.snapshots();
+    user = FirebaseFirestore.instance.collection('users').doc(widget.uid);
+    preferences = user.snapshots().map((snapshot) => snapshot.data());
     if (widget.teamId != null) { teamReference = FirebaseFirestore.instance.collection('organizations').doc(widget.teamId!); teamStream = teamReference!.snapshots(); }
   }
   void checkAccount() { if (FirebaseAuth.instance.currentUser?.uid != widget.uid) throw StateError('Аккаунт изменился. Откройте задачу заново.'); }
@@ -82,7 +84,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
     if (stamp is Timestamp) TextButton.icon(onPressed: busy ? null : () { cancelReminder(); }, icon: const Icon(Icons.alarm_off), label: const Text('Отменить напоминание')),
     if (done) const Text('Для выполненной задачи новое напоминание не планируется.'),
   ])));
-  Widget taskBody(Map<String, dynamic>? team) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(stream: taskStream, builder: (context, snapshot) {
+  Widget taskBody(Map<String, dynamic>? team) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(key: ValueKey('task:${widget.reference.path}'), stream: taskStream, builder: (context, snapshot) {
     if (snapshot.hasError) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(errorText(snapshot.error!))));
     if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
     final data = snapshot.data!.data();
@@ -109,13 +111,11 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
       if (message != null) Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(message!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
       const SizedBox(height: 16),
       if (canRemind && widget.teamId == null) reminderControls(data['remindAt'], status == 'done'),
-      if (canRemind && widget.teamId != null) StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(stream: preferences, builder: (context, prefs) {
-        if (prefs.hasError) return Text(errorText(prefs.error!));
-        if (!prefs.hasData) return const Center(child: CircularProgressIndicator());
-        final values = prefs.data!.data()?['teamReminders'];
-        final pref = values is Map ? values[reminderKey(widget.teamId!, widget.reference.id)] : null;
-        return reminderControls(pref is Map ? pref['remindAt'] : null, status == 'done');
-      }),
+      if (canRemind && widget.teamId != null) ReminderPreferencePanel(
+        key: ValueKey('reminder:${widget.uid}:${widget.reference.path}'),
+        stream: preferences, preferenceKey: reminderKey(widget.teamId!, widget.reference.id), errorFormatter: errorText,
+        builder: (value) => reminderControls(value, status == 'done'),
+      ),
       if (!canRemind) const Text('Личное напоминание доступно только текущему исполнителю.'),
     ]);
   });
