@@ -69,7 +69,7 @@ class _WorkspaceState extends State<Workspace> {
           if (filter == 2 && !done) return false;
           return '${data['title'] ?? ''} ${data['description'] ?? ''}'.toLowerCase().contains(query);
         }).toList();
-        if (docs.isEmpty) return const Center(child: Text(filter == 3 ? 'Архив пуст' : 'Задач не найдено'));
+        if (docs.isEmpty) return Center(child: Text(filter == 3 ? 'Архив пуст' : 'Задач не найдено'));
         return ListView.builder(padding: const EdgeInsets.only(bottom: 88), itemCount: docs.length, itemBuilder: (context, index) {
           final doc = docs[index]; final data = doc.data(); final done = data['status'] == 'done'; final deadline = (data['deadline'] as Timestamp?)?.toDate(); final now = DateTime.now();
           final overdue = !done && deadline != null && deadline.isBefore(DateTime(now.year, now.month, now.day));
