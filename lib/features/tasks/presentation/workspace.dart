@@ -36,7 +36,15 @@ class _WorkspaceState extends State<Workspace> {
   Future<void> toggle(String id, bool done) async {
     if (pending.contains(id)) return;
     setState(() => pending.add(id));
-    try { await tasks.doc(id).update({'status': done ? 'done' : 'todo', 'updatedAt': FieldValue.serverTimestamp()}); }
+    String? previous;
+    try {
+      final snapshot = await tasks.doc(id).get();
+      previous = snapshot.data()?['status'] as String?;
+      await tasks.doc(id).update({'status': done ? 'done' : 'todo', 'updatedAt': FieldValue.serverTimestamp()});
+      if (mounted && previous != null && previous != (done ? 'done' : 'todo')) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: const Text('Статус изменён'), action: SnackBarAction(label: 'Отменить', onPressed: () { tasks.doc(id).update({'status': previous!, 'updatedAt': FieldValue.serverTimestamp()}); })));
+      }
+    }
     catch (error) { report(error); }
     finally { if (mounted) setState(() => pending.remove(id)); }
   }
@@ -50,12 +58,18 @@ class _WorkspaceState extends State<Workspace> {
     floatingActionButton: FloatingActionButton(onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskEditor(reference: tasks.doc()))), child: const Icon(Icons.add)),
     body: Column(children: [
       Padding(padding: const EdgeInsets.all(16), child: TextField(decoration: const InputDecoration(labelText: 'Поиск по названию и описанию', prefixIcon: Icon(Icons.search)), onChanged: (value) => setState(() => query = value.trim().toLowerCase()))),
-      Wrap(spacing: 8, children: List.generate(3, (i) => ChoiceChip(label: Text(['Все', 'Активные', 'Выполненные'][i]), selected: filter == i, onSelected: (_) => setState(() => filter = i)))),
+      Wrap(spacing: 8, children: List.generate(4, (i) => ChoiceChip(label: Text(['Все', 'Активные', 'Выполненные', 'Архив'][i]), selected: filter == i, onSelected: (_) => setState(() => filter = i)))),
       Expanded(child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(stream: stream, builder: (context, snapshot) {
         if (snapshot.hasError) return Center(child: Text(errorText(snapshot.error!)));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        final docs = snapshot.data!.docs.where((doc) { final data = doc.data(); final done = data['status'] == 'done'; return (filter == 0 || (filter == 1 && !done) || (filter == 2 && done)) && '${data['title'] ?? ''} ${data['description'] ?? ''}'.toLowerCase().contains(query); }).toList();
-        if (docs.isEmpty) return const Center(child: Text('Задач не найдено'));
+        final docs = snapshot.data!.docs.where((doc) {
+          final data = doc.data(); final done = data['status'] == 'done'; final archived = data['archived'] == true;
+          if (filter == 3 ? !archived : archived) return false;
+          if (filter == 1 && done) return false;
+          if (filter == 2 && !done) return false;
+          return '${data['title'] ?? ''} ${data['description'] ?? ''}'.toLowerCase().contains(query);
+        }).toList();
+        if (docs.isEmpty) return const Center(child: Text(filter == 3 ? 'Архив пуст' : 'Задач не найдено'));
         return ListView.builder(padding: const EdgeInsets.only(bottom: 88), itemCount: docs.length, itemBuilder: (context, index) {
           final doc = docs[index]; final data = doc.data(); final done = data['status'] == 'done'; final deadline = (data['deadline'] as Timestamp?)?.toDate(); final now = DateTime.now();
           final overdue = !done && deadline != null && deadline.isBefore(DateTime(now.year, now.month, now.day));

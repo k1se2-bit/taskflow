@@ -70,6 +70,15 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
     else { await user.update({'teamReminders.${reminderKey(widget.teamId!, widget.reference.id)}': FieldValue.delete()}); }
     await ReminderEngine.instance.refresh();
   });
+  Future<void> setArchived(bool value) => perform(() async {
+    final latest = await widget.reference.get(const GetOptions(source: Source.server));
+    final data = latest.data();
+    if (data == null || widget.teamId != null || !detailsCanEdit(widget.uid, personalOwner: personalOwner, team: null)) throw StateError('Архивировать может только владелец личной задачи.');
+    final previous = data['archived'] == true;
+    if (previous == value) return;
+    await widget.reference.update({'archived': value, 'archivedAt': value ? FieldValue.serverTimestamp() : FieldValue.delete(), 'updatedAt': FieldValue.serverTimestamp()});
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(value ? 'Задача в архиве' : 'Задача возвращена из архива'), action: SnackBarAction(label: 'Отменить', onPressed: () { widget.reference.update({'archived': previous, 'archivedAt': previous ? FieldValue.serverTimestamp() : FieldValue.delete(), 'updatedAt': FieldValue.serverTimestamp()}); })));
+  });
   void edit(Map<String, dynamic> data, Map<String, dynamic>? team) {
     if (!detailsCanEdit(widget.uid, personalOwner: personalOwner, team: team)) return;
     if (widget.teamId == null) { Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskEditor(reference: widget.reference, initial: data))); return; }
@@ -92,6 +101,7 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
     final canEdit = detailsCanEdit(widget.uid, personalOwner: personalOwner, team: team);
     final canStatus = detailsCanChangeStatus(widget.uid, data, personalOwner: personalOwner, team: team);
     final canRemind = detailsCanRemind(widget.uid, data, personalOwner: personalOwner, team: team);
+    final archived = data['archived'] == true;
     final stamp = data['deadline']; final status = data['status'] as String? ?? 'todo';
     final statuses = widget.teamId == null ? const {'todo': 'Новая', 'done': 'Выполнена'} : teamStatuses;
     final raw = team?['memberNames']; final names = raw is Map ? raw.map((key, value) => MapEntry(key.toString(), value.toString())) : <String, String>{};
@@ -101,10 +111,12 @@ class _TaskDetailsPageState extends State<TaskDetailsPage> {
       if (widget.teamId != null) Text('Исполнитель: ${memberLabel(names, data['assignedTo'] as String? ?? '', widget.uid)}'),
       Text(stamp is Timestamp ? 'Срок: ${dateLabel(stamp.toDate())}' : 'Без срока'),
       if (widget.teamId == null) Text('Приоритет: ${priorities[data['priority']] ?? 'Обычный'}'),
+      if (archived) const Text('Задача в архиве'),
       const SizedBox(height: 12), SelectableText((data['description'] as String? ?? '').isEmpty ? 'Без описания' : data['description'] as String),
       const SizedBox(height: 16), Text('Статус: ${teamStatuses[status] ?? status}'),
-      if (canStatus) PopupMenuButton<String>(enabled: !busy, onSelected: (value) { perform(() async { await widget.reference.update({'status': value, 'updatedAt': FieldValue.serverTimestamp()}); }); }, itemBuilder: (_) => statuses.entries.map((entry) => PopupMenuItem(value: entry.key, child: Text(entry.value))).toList(), child: const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Изменить статус ▾'))),
+      if (canStatus && !archived) PopupMenuButton<String>(enabled: !busy, onSelected: (value) { perform(() async { await widget.reference.update({'status': value, 'updatedAt': FieldValue.serverTimestamp()}); }); }, itemBuilder: (_) => statuses.entries.map((entry) => PopupMenuItem(value: entry.key, child: Text(entry.value))).toList(), child: const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Text('Изменить статус ▾'))),
       if (canEdit) FilledButton.icon(onPressed: busy ? null : () => edit(data, team), icon: const Icon(Icons.edit_outlined), label: const Text('Редактировать')),
+      if (widget.teamId == null) OutlinedButton.icon(onPressed: busy ? null : () => setArchived(!archived), icon: Icon(archived ? Icons.unarchive_outlined : Icons.archive_outlined), label: Text(archived ? 'Вернуть из архива' : 'В архив')),
       if (snapshot.data!.metadata.hasPendingWrites) const Text('Есть несинхронизированные изменения.'),
       if (snapshot.data!.metadata.isFromCache) const Text('Показаны данные из локального кэша.'),
       if (busy) const LinearProgressIndicator(),
