@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import '../../../app.dart' show AccountScreen, errorText;
 import '../../../core/theme/app_theme.dart';
 import '../../teams/team_tasks.dart' show TeamTaskEditor, teamStatuses;
-import 'workspace.dart' show Workspace, TaskEditor, dateLabel;
+import 'workspace.dart' show Workspace, dateLabel;
+import 'task_details_page.dart' show TaskDetailsPage;
 
 class CalendarApp extends StatefulWidget {
   const CalendarApp({super.key});
@@ -73,13 +74,13 @@ class _TaskCalendarState extends State<TaskCalendar> {
     if (s.hasError) return failure(s.error!);
     if (!s.hasData) return const Center(child: CircularProgressIndicator());
     final docs = s.data!.docs.where((d) => calendarMatches(d.data(), selected, filter, overdue)).toList();
-    if (docs.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Личных задач по выбранным условиям нет. Задачи без срока доступны во вкладке «Задачи».'));
+    if (docs.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Личных задач по выбранным условиям нет. Задачи без срока доступны на «Сегодня» и в полном личном списке.'));
     return Column(children: docs.map((doc) {
       final data = doc.data(); final done = data['status'] == 'done';
       return Card(child: ListTile(leading: Icon(done ? Icons.check_circle_outline : Icons.radio_button_unchecked),
         title: Text(data['title'] as String? ?? '', style: TextStyle(decoration: done ? TextDecoration.lineThrough : null)),
         subtitle: Text('${dateLabel((data['deadline'] as Timestamp).toDate())} · Личная\n${data['description'] ?? ''}'), trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskEditor(reference: doc.reference, initial: data)))));
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: doc.reference)))));
     }).toList());
   });
   Widget teamTasks() => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(stream: teams, builder: (context, s) {
@@ -88,12 +89,8 @@ class _TaskCalendarState extends State<TaskCalendar> {
     final docs = s.data!.docs.toList()..sort((a, b) => (a.data()['name'] as String? ?? '').compareTo(b.data()['name'] as String? ?? ''));
     if (docs.isEmpty) return const Padding(padding: EdgeInsets.all(16), child: Text('Доступных команд нет. Создайте команду или дождитесь одобрения заявки во вкладке «Команды».'));
     QueryDocumentSnapshot<Map<String, dynamic>> selectedTeam = docs.first;
-
     for (final doc in docs) {
-      if (doc.id == teamId) {
-        selectedTeam = doc;
-        break;
-      }
+      if (doc.id == teamId) { selectedTeam = doc; break; }
     }
     final owner = selectedTeam.data()['ownerId'] == widget.uid;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -152,8 +149,8 @@ class _TeamCalendarTasksState extends State<TeamCalendarTasks> {
     catch (e) { if (mounted) setState(() => error = errorText(e)); }
     finally { if (mounted) setState(() => pending.remove(doc.id)); }
   }
-  void details(Map<String, dynamic> data) {
-    showDialog<void>(context: context, builder: (ctx) => AlertDialog(title: Text(data['title'] as String? ?? ''), content: SingleChildScrollView(child: Text('${data['description'] ?? ''}\n\nКоманда: ${widget.team.data()['name']}\nИсполнитель: ${label(data['assignedTo'] as String? ?? '')}\nСрок: ${dateLabel((data['deadline'] as Timestamp).toDate())}\nСтатус: ${teamStatuses[data['status']] ?? data['status']}')), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть'))]));
+  void details(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: doc.reference, teamId: widget.team.id)));
   }
   @override
   Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -167,7 +164,7 @@ class _TeamCalendarTasksState extends State<TeamCalendarTasks> {
         final data = doc.data(); final done = data['status'] == 'done'; final status = data['status'] as String? ?? 'todo';
         return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           ListTile(contentPadding: EdgeInsets.zero, leading: Icon(done ? Icons.check_circle_outline : Icons.groups_outlined), title: Text(data['title'] as String? ?? '', style: TextStyle(decoration: done ? TextDecoration.lineThrough : null)),
-            subtitle: Text('${widget.team.data()['name']}\n${label(data['assignedTo'] as String? ?? '')}\nСрок: ${dateLabel((data['deadline'] as Timestamp).toDate())}'), onTap: () => details(data),
+            subtitle: Text('${widget.team.data()['name']}\n${label(data['assignedTo'] as String? ?? '')}\nСрок: ${dateLabel((data['deadline'] as Timestamp).toDate())}'), onTap: pending.contains(doc.id) ? null : () => details(doc),
             trailing: owner ? IconButton(tooltip: 'Редактировать', icon: const Icon(Icons.edit_outlined), onPressed: pending.contains(doc.id) ? null : () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TeamTaskEditor(team: widget.team.reference, uid: widget.uid, members: members(), task: doc.reference, initial: data)))) : null),
           PopupMenuButton<String>(enabled: !pending.contains(doc.id), onSelected: (value) => change(doc, value), itemBuilder: (_) => teamStatuses.entries.map((e) => PopupMenuItem(value: e.key, child: Text(e.value))).toList(), child: Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(pending.contains(doc.id) ? 'Сохранение…' : '${teamStatuses[status] ?? status} ▾'))),
         ])));
