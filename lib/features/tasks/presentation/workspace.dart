@@ -69,12 +69,20 @@ class _WorkspaceState extends State<Workspace> {
           if (filter == 2 && !done) return false;
           return '${data['title'] ?? ''} ${data['description'] ?? ''}'.toLowerCase().contains(query);
         }).toList();
+        if (filter == 3) {
+          docs.sort((a, b) {
+            final aStamp = a.data()['archivedAt']; final bStamp = b.data()['archivedAt'];
+            return (bStamp is Timestamp ? bStamp.millisecondsSinceEpoch : 0).compareTo(aStamp is Timestamp ? aStamp.millisecondsSinceEpoch : 0);
+          });
+        }
         if (docs.isEmpty) return Center(child: Text(filter == 3 ? 'Архив пуст' : 'Задач не найдено'));
         return ListView.builder(padding: const EdgeInsets.only(bottom: 88), itemCount: docs.length, itemBuilder: (context, index) {
           final doc = docs[index]; final data = doc.data(); final done = data['status'] == 'done'; final deadline = (data['deadline'] as Timestamp?)?.toDate(); final now = DateTime.now();
           final overdue = !done && deadline != null && deadline.isBefore(DateTime(now.year, now.month, now.day));
+          final archivedAt = data['archivedAt'] is Timestamp ? (data['archivedAt'] as Timestamp).toDate() : null;
+          final details = '${priorities[data['priority']] ?? 'Обычный'}${deadline == null ? '' : ' • ${dateLabel(deadline)}'}${overdue ? ' • Просрочено' : ''}${filter == 3 && archivedAt != null ? ' • В архиве с ${dateLabel(archivedAt)}' : ''}${doc.metadata.hasPendingWrites ? ' • Синхронизация…' : ''}';
           return ListTile(leading: Checkbox(value: done, onChanged: pending.contains(doc.id) ? null : (value) => toggle(doc.id, value ?? false)), title: Text(data['title'] as String? ?? '', style: TextStyle(decoration: done ? TextDecoration.lineThrough : null)),
-            subtitle: Text('${priorities[data['priority']] ?? 'Обычный'}${deadline == null ? '' : ' • ${dateLabel(deadline)}'}${overdue ? ' • Просрочено' : ''}${doc.metadata.hasPendingWrites ? ' • Синхронизация…' : ''}', style: TextStyle(color: overdue ? Theme.of(context).colorScheme.error : null)),
+            subtitle: Text(details, style: TextStyle(color: overdue ? Theme.of(context).colorScheme.error : null)),
             trailing: const Icon(Icons.chevron_right), onTap: pending.contains(doc.id) ? null : () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TaskDetailsPage(uid: widget.uid, reference: doc.reference))));
         });
       })),
